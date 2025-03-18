@@ -1,15 +1,13 @@
 import pandas as pd
 import numpy as np
 from sklearn.preprocessing import MinMaxScaler
-from sklearn.model_selection import train_test_split
+from sklearn.linear_model import LinearRegression
+from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import LSTM, Dense, Dropout
-import tensorflow as tf
 
 class PricePredictionModel:
     """
-    LSTM-based price prediction model for stocks
+    Machine learning-based price prediction model for stocks
     """
     
     def __init__(self):
@@ -17,103 +15,113 @@ class PricePredictionModel:
         self.model = None
         self.scaler = MinMaxScaler(feature_range=(0, 1))
         self.accuracy = 0
-        self.sequence_length = 60  # Number of time steps to look back
+        self.window_size = 20  # Number of days to look back
         self.trained = False
+        self.model_type = 'random_forest'  # 'linear' or 'random_forest'
     
-    def _create_sequences(self, data):
+    def _create_features(self, data):
         """
-        Create sequences for LSTM model
+        Create features for the model
         
         Parameters:
         -----------
-        data : numpy.ndarray
-            Scaled price data
+        data : pandas.DataFrame
+            DataFrame with stock price data including 'Close' column
             
         Returns:
         --------
         tuple
-            X (sequences) and y (labels)
+            X (features) and y (target)
         """
-        X = []
-        y = []
+        df = data.copy()
         
-        for i in range(self.sequence_length, len(data)):
-            X.append(data[i-self.sequence_length:i, 0])
-            y.append(data[i, 0])
-            
-        return np.array(X), np.array(y)
+        # Create lag features
+        for i in range(1, self.window_size + 1):
+            df[f'lag_{i}'] = df['Close'].shift(i)
+        
+        # Create moving average features
+        df['ma_5'] = df['Close'].rolling(window=5).mean()
+        df['ma_10'] = df['Close'].rolling(window=10).mean()
+        df['ma_20'] = df['Close'].rolling(window=20).mean()
+        df['ma_50'] = df['Close'].rolling(window=50).mean()
+        
+        # Volatility features
+        df['volatility_5'] = df['Close'].rolling(window=5).std()
+        df['volatility_10'] = df['Close'].rolling(window=10).std()
+        
+        # Price momentum
+        df['momentum_5'] = df['Close'] / df['Close'].shift(5) - 1
+        df['momentum_10'] = df['Close'] / df['Close'].shift(10) - 1
+        
+        # Create target
+        df['target'] = df['Close']
+        
+        # Drop NaN rows
+        df = df.dropna()
+        
+        # Define features and target
+        features = [f'lag_{i}' for i in range(1, self.window_size + 1)] + \
+                  ['ma_5', 'ma_10', 'ma_20', 'ma_50', 'volatility_5', 'volatility_10', 'momentum_5', 'momentum_10']
+        
+        X = df[features]
+        y = df['target']
+        
+        return X, y
     
     def train(self, stock_data):
         """
-        Train the LSTM model on historical stock data
+        Train the model on historical stock data
         
         Parameters:
         -----------
         stock_data : pandas.DataFrame
             DataFrame with stock price data including 'Close' column
         """
-        # Extract and reshape close prices
-        data = stock_data['Close'].values.reshape(-1, 1)
+        # Ensure data is in the right format
+        data = stock_data.copy()
+        data = data[['Close']]
         
-        # Scale the data
-        scaled_data = self.scaler.fit_transform(data)
+        # Create features
+        X, y = self._create_features(data)
         
-        # Create sequences
-        X, y = self._create_sequences(scaled_data)
+        if len(X) < self.window_size + 10:
+            raise ValueError(f"Not enough data to train model. Need at least {self.window_size + 10} data points.")
         
-        # Reshape for LSTM [samples, time steps, features]
-        X = np.reshape(X, (X.shape[0], X.shape[1], 1))
+        # Split data into train and test sets (80/20)
+        split_idx = int(len(X) * 0.8)
+        X_train, X_test = X[:split_idx], X[split_idx:]
+        y_train, y_test = y[:split_idx], y[split_idx:]
         
-        # Split into training and testing sets
-        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, shuffle=False)
+        # Scale features
+        X_train_scaled = self.scaler.fit_transform(X_train)
+        X_test_scaled = self.scaler.transform(X_test)
         
-        # Build LSTM model
-        self.model = Sequential()
+        # Create and train the model
+        if self.model_type == 'linear':
+            self.model = LinearRegression()
+        else:  # random_forest
+            self.model = RandomForestRegressor(n_estimators=100, random_state=42)
         
-        # First LSTM layer with dropout
-        self.model.add(LSTM(units=50, return_sequences=True, input_shape=(X_train.shape[1], 1)))
-        self.model.add(Dropout(0.2))
-        
-        # Second LSTM layer with dropout
-        self.model.add(LSTM(units=50, return_sequences=False))
-        self.model.add(Dropout(0.2))
-        
-        # Output layer
-        self.model.add(Dense(units=1))
-        
-        # Compile the model
-        self.model.compile(optimizer='adam', loss='mean_squared_error')
-        
-        # Train the model
-        # In a real application, you might want to use callbacks for early stopping
-        # and learning rate scheduling
-        self.model.fit(
-            X_train, y_train,
-            epochs=25,
-            batch_size=32,
-            validation_data=(X_test, y_test),
-            verbose=0
-        )
+        self.model.fit(X_train_scaled, y_train)
         
         # Make predictions on test set
-        y_pred = self.model.predict(X_test)
-        
-        # Inverse transform the predictions
-        y_pred_actual = self.scaler.inverse_transform(y_pred)
-        y_test_actual = self.scaler.inverse_transform(y_test.reshape(-1, 1))
+        y_pred = self.model.predict(X_test_scaled)
         
         # Calculate accuracy metrics
-        mae = mean_absolute_error(y_test_actual, y_pred_actual)
-        rmse = np.sqrt(mean_squared_error(y_test_actual, y_pred_actual))
-        r2 = r2_score(y_test_actual, y_pred_actual)
+        mae = mean_absolute_error(y_test, y_pred)
+        rmse = np.sqrt(mean_squared_error(y_test, y_pred))
+        r2 = r2_score(y_test, y_pred)
         
         # Calculate a simplified accuracy percentage
         # Using Mean Absolute Percentage Error (MAPE)
-        mape = np.mean(np.abs((y_test_actual - y_pred_actual) / y_test_actual)) * 100
+        mape = np.mean(np.abs((y_test - y_pred) / y_test)) * 100
         self.accuracy = 100 - mape  # Convert error to accuracy
         
         # Set trained flag
         self.trained = True
+        
+        # Save the last row of data for prediction
+        self.last_data = data.tail(self.window_size)
     
     def predict(self, stock_data, future_days=30):
         """
@@ -134,38 +142,53 @@ class PricePredictionModel:
         if not self.trained:
             raise ValueError("Model must be trained before making predictions")
         
-        # Extract and reshape close prices
-        data = stock_data['Close'].values.reshape(-1, 1)
+        # Get the latest data for prediction
+        data = stock_data.copy()
+        data = data[['Close']]
         
-        # Scale the data
-        scaled_data = self.scaler.transform(data)
-        
-        # Create input sequence for prediction
-        # Use the last `sequence_length` days for the initial prediction
-        input_data = scaled_data[-self.sequence_length:]
-        
-        # Initialize array for predictions
+        # Prepare for predictions
         predictions = []
+        pred_data = data.copy().tail(self.window_size + future_days)
         
-        # Generate predictions for each future day
-        for _ in range(future_days):
-            # Reshape for LSTM [samples, time steps, features]
-            x_input = np.reshape(input_data, (1, self.sequence_length, 1))
+        # Iteratively predict future days
+        for i in range(future_days):
+            # Create features for the current step
+            X_pred, _ = self._create_features(pred_data)
+            X_pred = X_pred.tail(1)  # Take only the last row
             
-            # Predict next day
-            pred = self.model.predict(x_input, verbose=0)
+            # Scale features
+            X_pred_scaled = self.scaler.transform(X_pred)
             
-            # Append prediction to the list
-            predictions.append(pred[0][0])
+            # Make prediction
+            pred = self.model.predict(X_pred_scaled)[0]
+            predictions.append(pred)
             
-            # Update input sequence (remove oldest day, add prediction)
-            input_data = np.append(input_data[1:], pred, axis=0)
+            # Update data for next prediction
+            next_idx = len(pred_data)
+            pred_data.loc[next_idx] = [pred]  # Add new prediction to Close
+            
+            # Calculate new features for the next step
+            for j in range(1, self.window_size + 1):
+                if next_idx - j >= 0:
+                    pred_data.loc[next_idx, f'lag_{j}'] = pred_data.loc[next_idx - j, 'Close']
+            
+            # Calculate MAs
+            pred_data.loc[next_idx, 'ma_5'] = pred_data['Close'].tail(5).mean()
+            pred_data.loc[next_idx, 'ma_10'] = pred_data['Close'].tail(10).mean()
+            pred_data.loc[next_idx, 'ma_20'] = pred_data['Close'].tail(20).mean()
+            pred_data.loc[next_idx, 'ma_50'] = pred_data['Close'].tail(50).mean()
+            
+            # Calculate volatility
+            pred_data.loc[next_idx, 'volatility_5'] = pred_data['Close'].tail(5).std()
+            pred_data.loc[next_idx, 'volatility_10'] = pred_data['Close'].tail(10).std()
+            
+            # Calculate momentum
+            if next_idx - 5 >= 0:
+                pred_data.loc[next_idx, 'momentum_5'] = pred_data.loc[next_idx, 'Close'] / pred_data.loc[next_idx - 5, 'Close'] - 1
+            if next_idx - 10 >= 0:
+                pred_data.loc[next_idx, 'momentum_10'] = pred_data.loc[next_idx, 'Close'] / pred_data.loc[next_idx - 10, 'Close'] - 1
         
-        # Convert predictions to actual prices
-        predictions = np.array(predictions).reshape(-1, 1)
-        predicted_prices = self.scaler.inverse_transform(predictions)
-        
-        return predicted_prices.flatten()
+        return np.array(predictions)
     
     def evaluate(self, stock_data, days_to_evaluate=30):
         """

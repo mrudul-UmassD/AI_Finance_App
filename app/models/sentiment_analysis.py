@@ -3,12 +3,11 @@ import numpy as np
 from nltk.sentiment.vader import SentimentIntensityAnalyzer
 from nltk.tokenize import word_tokenize
 from nltk.corpus import stopwords
-from transformers import pipeline, AutoModelForSequenceClassification, AutoTokenizer
 import re
 
 class SentimentAnalyzer:
     """
-    Sentiment analysis model for financial news and texts
+    Sentiment analysis model for financial news and texts using VADER and finance-specific lexicons
     """
     
     def __init__(self, model_type='vader'):
@@ -18,9 +17,9 @@ class SentimentAnalyzer:
         Parameters:
         -----------
         model_type : str
-            Type of model to use ('vader', 'transformers', or 'ensemble')
+            Type of model to use (only 'vader' is supported for lightweight version)
         """
-        self.model_type = model_type
+        self.model_type = 'vader'  # Force vader for lightweight version
         
         # Initialize VADER sentiment analyzer
         try:
@@ -43,17 +42,48 @@ class SentimentAnalyzer:
             
         self.stop_words = set(stopwords.words('english'))
         
-        # Initialize transformer model for more advanced sentiment analysis
-        if model_type in ['transformers', 'ensemble']:
-            try:
-                # Financial domain-specific sentiment model
-                model_name = "ProsusAI/finbert"
-                self.transformer_model = AutoModelForSequenceClassification.from_pretrained(model_name)
-                self.transformer_tokenizer = AutoTokenizer.from_pretrained(model_name)
-                self.transformer = pipeline("sentiment-analysis", model=self.transformer_model, tokenizer=self.transformer_tokenizer)
-            except:
-                # Fallback to generic sentiment model
-                self.transformer = pipeline("sentiment-analysis")
+        # Financial domain-specific lexicon
+        self.financial_lexicon = {
+            # Positive financial terms
+            'growth': 0.7,
+            'profit': 0.8,
+            'revenue': 0.6,
+            'earnings': 0.6,
+            'dividend': 0.5,
+            'bullish': 0.9,
+            'outperform': 0.8,
+            'upgrade': 0.7,
+            'recovery': 0.6,
+            'expansion': 0.6,
+            'beat': 0.7,
+            'exceeds': 0.7,
+            'strong': 0.6,
+            'positive': 0.7,
+            'upward': 0.6,
+            'rise': 0.6,
+            'gain': 0.6,
+            'improve': 0.6,
+            
+            # Negative financial terms
+            'loss': -0.8,
+            'debt': -0.6,
+            'bearish': -0.9,
+            'downgrade': -0.7,
+            'decline': -0.6,
+            'recession': -0.8,
+            'bankruptcy': -0.9,
+            'crash': -0.8,
+            'crisis': -0.8,
+            'sell-off': -0.7,
+            'default': -0.8,
+            'miss': -0.7,
+            'weak': -0.6,
+            'negative': -0.7,
+            'downward': -0.6,
+            'fall': -0.6,
+            'drop': -0.6,
+            'worsen': -0.7
+        }
     
     def _preprocess_text(self, text):
         """
@@ -112,14 +142,17 @@ class SentimentAnalyzer:
         if not preprocessed_text:
             return 0.0  # Neutral if no text
         
-        if self.model_type == 'vader':
-            return self._vader_sentiment(preprocessed_text)
-        elif self.model_type == 'transformers':
-            return self._transformer_sentiment(preprocessed_text)
-        elif self.model_type == 'ensemble':
-            return self._ensemble_sentiment(preprocessed_text)
-        else:
-            raise ValueError(f"Unknown model type: {self.model_type}")
+        # Get base sentiment from VADER
+        base_sentiment = self._vader_sentiment(preprocessed_text)
+        
+        # Enhance with finance-specific sentiment
+        finance_sentiment = self._financial_sentiment(preprocessed_text)
+        
+        # Weighted combination
+        combined_sentiment = 0.7 * base_sentiment + 0.3 * finance_sentiment
+        
+        # Ensure within range [-1, 1]
+        return max(-1.0, min(1.0, combined_sentiment))
     
     def _vader_sentiment(self, text):
         """
@@ -141,9 +174,9 @@ class SentimentAnalyzer:
         # Return compound score (normalized from -1 to 1)
         return scores['compound']
     
-    def _transformer_sentiment(self, text):
+    def _financial_sentiment(self, text):
         """
-        Get sentiment score using transformer model
+        Get finance-specific sentiment using the custom lexicon
         
         Parameters:
         -----------
@@ -153,58 +186,22 @@ class SentimentAnalyzer:
         Returns:
         --------
         float
-            Sentiment score (-1 to 1)
+            Finance-specific sentiment score (-1 to 1)
         """
-        # Handle text that is too long by chunking
-        max_length = 512
-        if len(text) > max_length:
-            chunks = [text[i:i+max_length] for i in range(0, len(text), max_length)]
-            scores = []
-            
-            for chunk in chunks:
-                result = self.transformer(chunk)
-                
-                # Map label to score
-                if result[0]['label'] == 'POSITIVE':
-                    scores.append(result[0]['score'])
-                elif result[0]['label'] == 'NEGATIVE':
-                    scores.append(-result[0]['score'])
-                else:  # NEUTRAL
-                    scores.append(0.0)
-            
-            # Average the scores
-            return np.mean(scores)
+        words = text.split()
+        total_score = 0.0
+        matched_words = 0
+        
+        for word in words:
+            if word in self.financial_lexicon:
+                total_score += self.financial_lexicon[word]
+                matched_words += 1
+        
+        # If we found any financial terms, return the average score
+        if matched_words > 0:
+            return total_score / matched_words
         else:
-            result = self.transformer(text)
-            
-            # Map label to score
-            if result[0]['label'] == 'POSITIVE':
-                return result[0]['score']
-            elif result[0]['label'] == 'NEGATIVE':
-                return -result[0]['score']
-            else:  # NEUTRAL
-                return 0.0
-    
-    def _ensemble_sentiment(self, text):
-        """
-        Get sentiment score using ensemble of models
-        
-        Parameters:
-        -----------
-        text : str
-            Preprocessed text
-            
-        Returns:
-        --------
-        float
-            Sentiment score (-1 to 1)
-        """
-        # Get scores from both models
-        vader_score = self._vader_sentiment(text)
-        transformer_score = self._transformer_sentiment(text)
-        
-        # Weighted average (giving more weight to the transformer model)
-        return 0.3 * vader_score + 0.7 * transformer_score
+            return 0.0  # Neutral if no financial terms found
     
     def analyze_multiple(self, texts):
         """
@@ -257,25 +254,18 @@ class SentimentAnalyzer:
         dict
             Dictionary with scores and context
         """
-        # List of positive financial terms
-        positive_terms = [
-            'growth', 'profit', 'revenue', 'earnings', 'dividend', 'bullish',
-            'outperform', 'upgrade', 'recovery', 'expansion', 'beat', 'exceeds',
-            'strong', 'positive', 'upward', 'rise', 'gain', 'improve'
-        ]
-        
-        # List of negative financial terms
-        negative_terms = [
-            'loss', 'debt', 'bearish', 'downgrade', 'decline', 'recession',
-            'bankruptcy', 'crash', 'crisis', 'sell-off', 'default', 'miss',
-            'weak', 'negative', 'downward', 'fall', 'drop', 'worsen'
-        ]
+        # List of positive and negative financial terms for counting
+        positive_terms = [term for term, score in self.financial_lexicon.items() if score > 0]
+        negative_terms = [term for term, score in self.financial_lexicon.items() if score < 0]
         
         # Preprocess text
         preprocessed_text = self._preprocess_text(text)
         
         # Get base sentiment
-        sentiment_score = self.analyze(text)
+        sentiment_score = self._vader_sentiment(preprocessed_text)
+        
+        # Get finance sentiment
+        finance_sentiment = self._financial_sentiment(preprocessed_text)
         
         # Count finance-specific terms
         words = preprocessed_text.split()
@@ -288,14 +278,15 @@ class SentimentAnalyzer:
         else:
             finance_bias = 0
         
-        # Adjust sentiment with finance bias
-        adjusted_score = 0.7 * sentiment_score + 0.3 * finance_bias
+        # Calculate adjusted score
+        adjusted_score = 0.7 * sentiment_score + 0.3 * finance_sentiment
         
         # Clip to range [-1, 1]
         adjusted_score = max(min(adjusted_score, 1.0), -1.0)
         
         return {
             'base_score': sentiment_score,
+            'finance_score': finance_sentiment,
             'finance_bias': finance_bias,
             'adjusted_score': adjusted_score,
             'positive_terms': positive_count,

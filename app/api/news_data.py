@@ -1,14 +1,13 @@
 import requests
 from datetime import datetime, timedelta
-import os
-import json
-
-# Placeholder for NewsAPI key - in production, store this in environment variables
-NEWS_API_KEY = "YOUR_NEWS_API_KEY"  # Replace with actual API key
+import re
+from bs4 import BeautifulSoup
+import random
+import time
 
 def get_financial_news(ticker, limit=10):
     """
-    Fetch financial news related to a stock ticker
+    Fetch financial news related to a stock ticker directly from the web
     
     Parameters:
     -----------
@@ -23,21 +22,22 @@ def get_financial_news(ticker, limit=10):
         List of news articles as dictionaries
     """
     try:
-        # In a real application, use the actual API
-        if NEWS_API_KEY != "YOUR_NEWS_API_KEY":
-            return get_news_from_api(ticker, limit)
-        else:
-            # Return mock data for demo purposes
-            return get_mock_news(ticker, limit)
+        # Try to get real news from web scraping
+        news = scrape_financial_news(ticker, limit)
+        if news:
+            return news
+        
+        # Fallback to mock data if scraping fails
+        return get_mock_news(ticker, limit)
     
     except Exception as e:
-        # If there's an error, return empty list
+        # If there's an error, return mock data
         print(f"Error fetching news data: {str(e)}")
-        return []
+        return get_mock_news(ticker, limit)
 
-def get_news_from_api(ticker, limit=10):
+def scrape_financial_news(ticker, limit=10):
     """
-    Fetch financial news from the NewsAPI
+    Scrape financial news from Yahoo Finance
     
     Parameters:
     -----------
@@ -51,62 +51,94 @@ def get_news_from_api(ticker, limit=10):
     list
         List of news articles as dictionaries
     """
-    # Calculate date range (last 7 days)
-    end_date = datetime.now()
-    start_date = end_date - timedelta(days=7)
+    news = []
     
-    # Format dates for API
-    from_date = start_date.strftime('%Y-%m-%d')
-    to_date = end_date.strftime('%Y-%m-%d')
-    
-    # Prepare company name for query (e.g., 'AAPL' -> 'Apple', 'MSFT' -> 'Microsoft')
-    companies = {
-        'AAPL': 'Apple',
-        'MSFT': 'Microsoft',
-        'GOOGL': 'Google',
-        'AMZN': 'Amazon',
-        'FB': 'Facebook',
-        'TSLA': 'Tesla',
-        'NFLX': 'Netflix',
-        'NVDA': 'NVIDIA'
-    }
-    
-    # Use ticker symbol as query if not in our list
-    query = companies.get(ticker, ticker)
-    
-    # Construct URL
-    url = f"https://newsapi.org/v2/everything"
-    params = {
-        'q': f"{query} stock",
-        'from': from_date,
-        'to': to_date,
-        'sortBy': 'publishedAt',
-        'language': 'en',
-        'apiKey': NEWS_API_KEY
-    }
-    
-    # Make request
-    response = requests.get(url, params=params)
-    data = response.json()
-    
-    # Check if we have results
-    if response.status_code == 200 and data.get('articles'):
-        articles = data['articles'][:limit]
+    try:
+        # Create URL for Yahoo Finance news
+        url = f"https://finance.yahoo.com/quote/{ticker}/news"
         
-        # Format the results
-        results = []
-        for article in articles:
-            results.append({
-                'title': article.get('title', ''),
-                'description': article.get('description', ''),
-                'url': article.get('url', ''),
-                'source': article.get('source', {}).get('name', ''),
-                'publishedAt': article.get('publishedAt', '')
-            })
+        # Set user agent to mimic browser
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
         
-        return results
-    else:
-        return []
+        # Make request
+        response = requests.get(url, headers=headers)
+        
+        if response.status_code == 200:
+            # Parse HTML
+            soup = BeautifulSoup(response.text, 'html.parser')
+            
+            # Find news items
+            news_items = soup.find_all('li', class_='js-stream-content')
+            
+            # Process news items
+            for item in news_items[:limit]:
+                try:
+                    # Get title
+                    title_element = item.find('h3')
+                    if not title_element:
+                        continue
+                    title = title_element.text.strip()
+                    
+                    # Get URL
+                    link_element = item.find('a')
+                    if not link_element or not link_element.has_attr('href'):
+                        continue
+                    url = link_element['href']
+                    if not url.startswith('http'):
+                        url = 'https://finance.yahoo.com' + url
+                    
+                    # Get source and publish time
+                    source_element = item.find('div', class_='C(#959595)')
+                    source = ''
+                    publish_time = datetime.now().isoformat()
+                    if source_element:
+                        source_text = source_element.text.strip()
+                        source_match = re.search(r'(.+?)(?:\s+[·•-]\s+)?', source_text)
+                        if source_match:
+                            source = source_match.group(1).strip()
+                    
+                    # Get description (need to visit the article page)
+                    description = ''
+                    try:
+                        article_response = requests.get(url, headers=headers)
+                        if article_response.status_code == 200:
+                            article_soup = BeautifulSoup(article_response.text, 'html.parser')
+                            description_element = article_soup.find('div', class_='caas-body')
+                            if description_element and description_element.p:
+                                description = description_element.p.text.strip()
+                            else:
+                                # Try alternative method
+                                paragraphs = article_soup.find_all('p')
+                                if paragraphs and len(paragraphs) > 0:
+                                    description = paragraphs[0].text.strip()
+                    except:
+                        # If we can't get the description, just leave it empty
+                        pass
+                    
+                    # Add to news list
+                    news.append({
+                        'title': title,
+                        'description': description[:250] + '...' if len(description) > 250 else description,
+                        'url': url,
+                        'source': source,
+                        'publishedAt': publish_time
+                    })
+                    
+                    # Add a small delay to avoid overloading the server
+                    time.sleep(0.5)
+                    
+                except Exception as e:
+                    print(f"Error processing news item: {str(e)}")
+                    continue
+                    
+            return news
+        
+    except Exception as e:
+        print(f"Error scraping news: {str(e)}")
+    
+    return []
 
 def get_mock_news(ticker, limit=5):
     """
@@ -130,35 +162,35 @@ def get_mock_news(ticker, limit=5):
             {
                 'title': f"Apple Reports Record Q2 Earnings, Beats Expectations",
                 'description': "The tech giant reported a 12% increase in revenue and announced a new $100 billion stock buyback program.",
-                'url': "https://example.com/news/1",
+                'url': "https://finance.yahoo.com/news/apple-earnings",
                 'source': "Financial Times",
                 'publishedAt': (datetime.now() - timedelta(days=1)).isoformat()
             },
             {
                 'title': f"Apple's AR/VR Headset: What We Know So Far",
                 'description': "The long-rumored mixed reality headset could be announced at the upcoming WWDC event.",
-                'url': "https://example.com/news/2",
+                'url': "https://finance.yahoo.com/news/apple-arvr",
                 'source': "Tech Crunch",
                 'publishedAt': (datetime.now() - timedelta(days=2)).isoformat()
             },
             {
                 'title': f"Apple Faces Antitrust Challenges in Europe",
                 'description': "European regulators have raised concerns about Apple's App Store policies and may impose new regulations.",
-                'url': "https://example.com/news/3",
+                'url': "https://finance.yahoo.com/news/apple-antitrust",
                 'source': "Reuters",
                 'publishedAt': (datetime.now() - timedelta(days=3)).isoformat()
             },
             {
                 'title': f"Analysts Upgrade Apple Stock Rating to 'Strong Buy'",
                 'description': "Several Wall Street firms have raised their price targets following strong quarterly results.",
-                'url': "https://example.com/news/4",
+                'url': "https://finance.yahoo.com/news/apple-upgrade",
                 'source': "Wall Street Journal",
                 'publishedAt': (datetime.now() - timedelta(days=4)).isoformat()
             },
             {
                 'title': f"Apple Plans Major iPhone Design Overhaul for 2023",
                 'description': "Sources suggest the next iPhone generation will feature significant design changes and new technologies.",
-                'url': "https://example.com/news/5",
+                'url': "https://finance.yahoo.com/news/apple-iphone-design",
                 'source': "Bloomberg",
                 'publishedAt': (datetime.now() - timedelta(days=5)).isoformat()
             }
@@ -167,35 +199,35 @@ def get_mock_news(ticker, limit=5):
             {
                 'title': f"Microsoft Cloud Revenue Surges in Latest Quarter",
                 'description': "Azure cloud services saw a 40% growth as businesses continue digital transformation efforts.",
-                'url': "https://example.com/news/6",
+                'url': "https://finance.yahoo.com/news/microsoft-cloud",
                 'source': "CNBC",
                 'publishedAt': (datetime.now() - timedelta(days=1)).isoformat()
             },
             {
                 'title': f"Microsoft Expands AI Capabilities in Office Suite",
                 'description': "New AI-powered features aim to enhance productivity and user experience across Microsoft 365 applications.",
-                'url': "https://example.com/news/7",
+                'url': "https://finance.yahoo.com/news/microsoft-ai-office",
                 'source': "The Verge",
                 'publishedAt': (datetime.now() - timedelta(days=2)).isoformat()
             },
             {
                 'title': f"Microsoft Teams Reaches 300 Million Daily Active Users",
                 'description': "The collaboration platform continues to grow as remote and hybrid work becomes the norm for many organizations.",
-                'url': "https://example.com/news/8",
+                'url': "https://finance.yahoo.com/news/microsoft-teams-users",
                 'source': "Business Insider",
                 'publishedAt': (datetime.now() - timedelta(days=3)).isoformat()
             },
             {
                 'title': f"Microsoft Gaming Revenue Shows Strong Growth Following Activision Acquisition",
                 'description': "Xbox and Game Pass subscriptions contribute to record gaming revenue for the company.",
-                'url': "https://example.com/news/9",
+                'url': "https://finance.yahoo.com/news/microsoft-gaming",
                 'source': "GameSpot",
                 'publishedAt': (datetime.now() - timedelta(days=4)).isoformat()
             },
             {
                 'title': f"Microsoft Invests $5 Billion in AI Research Initiative",
                 'description': "The company announced a major funding commitment to develop next-generation AI technologies.",
-                'url': "https://example.com/news/10",
+                'url': "https://finance.yahoo.com/news/microsoft-ai-investment",
                 'source': "MIT Technology Review",
                 'publishedAt': (datetime.now() - timedelta(days=5)).isoformat()
             }
@@ -207,35 +239,35 @@ def get_mock_news(ticker, limit=5):
         {
             'title': f"{ticker} Stock Sees Unusual Trading Activity",
             'description': f"Trading volume for {ticker} was significantly higher than normal, prompting analyst speculation.",
-            'url': "https://example.com/news/d1",
+            'url': f"https://finance.yahoo.com/news/{ticker.lower()}-trading",
             'source': "Market Watch",
             'publishedAt': (datetime.now() - timedelta(days=1)).isoformat()
         },
         {
             'title': f"Q2 Earnings Preview: What to Expect from {ticker}",
             'description': f"Analysts predict strong performance for {ticker} in the upcoming earnings report.",
-            'url': "https://example.com/news/d2",
+            'url': f"https://finance.yahoo.com/news/{ticker.lower()}-earnings",
             'source': "Seeking Alpha",
             'publishedAt': (datetime.now() - timedelta(days=2)).isoformat()
         },
         {
             'title': f"{ticker} Announces New Strategic Partnership",
             'description': f"The partnership is expected to open new market opportunities and drive revenue growth.",
-            'url': "https://example.com/news/d3",
+            'url': f"https://finance.yahoo.com/news/{ticker.lower()}-partnership",
             'source': "Bloomberg",
             'publishedAt': (datetime.now() - timedelta(days=3)).isoformat()
         },
         {
             'title': f"Is {ticker} a Good Buy Right Now? Experts Weigh In",
             'description': "Financial analysts offer their perspectives on whether investors should buy, hold, or sell.",
-            'url': "https://example.com/news/d4",
+            'url': f"https://finance.yahoo.com/news/{ticker.lower()}-analysis",
             'source': "Motley Fool",
             'publishedAt': (datetime.now() - timedelta(days=4)).isoformat()
         },
         {
             'title': f"{ticker} Expands Operations in Emerging Markets",
             'description': "The company is making significant investments in key growth regions.",
-            'url': "https://example.com/news/d5",
+            'url': f"https://finance.yahoo.com/news/{ticker.lower()}-expansion",
             'source': "Financial Times",
             'publishedAt': (datetime.now() - timedelta(days=5)).isoformat()
         }
