@@ -182,45 +182,80 @@ class PricePredictionModel:
         
         # Prepare for predictions
         predictions = []
-        pred_data = data.copy().tail(self.window_size + future_days)
+        
+        # Create a new DataFrame with continuous integer index to avoid index-related errors
+        pred_data = data.copy().tail(self.window_size + future_days).reset_index(drop=True)
         
         # Iteratively predict future days
         for i in range(future_days):
-            # Create features for the current step
-            X_pred, _ = self._create_features(pred_data)
-            X_pred = X_pred.tail(1)  # Take only the last row
+            try:
+                # Create features for the current step
+                X_pred, _ = self._create_features(pred_data)
+                if len(X_pred) == 0:
+                    # Not enough data to make prediction (e.g., after dropping NaNs)
+                    # Use a simple extrapolation based on recent trend
+                    last_prices = pred_data['Close'].iloc[-5:].values
+                    if len(last_prices) >= 2:
+                        # Simple trend extrapolation
+                        avg_change = np.mean(np.diff(last_prices))
+                        pred = last_prices[-1] + avg_change
+                    else:
+                        # Use last price if not enough data for trend
+                        pred = pred_data['Close'].iloc[-1]
+                else:
+                    X_pred = X_pred.iloc[-1:].reset_index(drop=True)  # Take only the last row
+                    
+                    # Scale features
+                    X_pred_scaled = self.scaler.transform(X_pred)
+                    
+                    # Make prediction
+                    pred = self.model.predict(X_pred_scaled)[0]
+                
+                predictions.append(pred)
+                
+                # Add the new prediction to the data, using next integer index
+                next_idx = len(pred_data)
+                new_row = pd.DataFrame({'Close': [pred]}, index=[next_idx])
+                pred_data = pd.concat([pred_data, new_row])
+                
+                # Calculate new features directly (safer than trying to assign to specific indices)
+                # This creates a fresh set of features for all data including the new prediction
+                # These will be used in the next iteration
+                if i < future_days - 1:  # No need to calculate features on the last iteration
+                    # Create lag features (we do this explicitly to avoid indexing errors)
+                    for j in range(1, self.window_size + 1):
+                        pred_data[f'lag_{j}'] = pred_data['Close'].shift(j)
+                    
+                    # Create moving average features
+                    window_sizes = [5, 10, 20, 50]
+                    for size in window_sizes:
+                        if len(pred_data) >= size:
+                            pred_data[f'ma_{size}'] = pred_data['Close'].rolling(window=size).mean()
+                    
+                    # Volatility features
+                    if len(pred_data) >= 5:
+                        pred_data['volatility_5'] = pred_data['Close'].rolling(window=5).std()
+                    if len(pred_data) >= 10:
+                        pred_data['volatility_10'] = pred_data['Close'].rolling(window=10).std()
+                    
+                    # Price momentum
+                    if len(pred_data) >= 6:  # Need at least 6 rows for 5-period momentum
+                        pred_data['momentum_5'] = pred_data['Close'] / pred_data['Close'].shift(5) - 1
+                    if len(pred_data) >= 11:  # Need at least 11 rows for 10-period momentum
+                        pred_data['momentum_10'] = pred_data['Close'] / pred_data['Close'].shift(10) - 1
             
-            # Scale features
-            X_pred_scaled = self.scaler.transform(X_pred)
-            
-            # Make prediction
-            pred = self.model.predict(X_pred_scaled)[0]
-            predictions.append(pred)
-            
-            # Update data for next prediction
-            next_idx = len(pred_data)
-            pred_data.loc[next_idx] = [pred]  # Add new prediction to Close
-            
-            # Calculate new features for the next step
-            for j in range(1, self.window_size + 1):
-                if next_idx - j >= 0:
-                    pred_data.loc[next_idx, f'lag_{j}'] = pred_data.loc[next_idx - j, 'Close']
-            
-            # Calculate MAs
-            pred_data.loc[next_idx, 'ma_5'] = pred_data['Close'].tail(5).mean()
-            pred_data.loc[next_idx, 'ma_10'] = pred_data['Close'].tail(10).mean()
-            pred_data.loc[next_idx, 'ma_20'] = pred_data['Close'].tail(20).mean()
-            pred_data.loc[next_idx, 'ma_50'] = pred_data['Close'].tail(50).mean()
-            
-            # Calculate volatility
-            pred_data.loc[next_idx, 'volatility_5'] = pred_data['Close'].tail(5).std()
-            pred_data.loc[next_idx, 'volatility_10'] = pred_data['Close'].tail(10).std()
-            
-            # Calculate momentum
-            if next_idx - 5 >= 0:
-                pred_data.loc[next_idx, 'momentum_5'] = pred_data.loc[next_idx, 'Close'] / pred_data.loc[next_idx - 5, 'Close'] - 1
-            if next_idx - 10 >= 0:
-                pred_data.loc[next_idx, 'momentum_10'] = pred_data.loc[next_idx, 'Close'] / pred_data.loc[next_idx - 10, 'Close'] - 1
+            except Exception as e:
+                # If prediction fails for this step, use a simple forecasting method
+                if len(predictions) > 0:
+                    # Use the last prediction
+                    pred = predictions[-1]
+                else:
+                    # Use the last actual price
+                    pred = data['Close'].iloc[0]
+                
+                predictions.append(pred)
+                # Print the error but continue with predictions
+                print(f"Warning: Error during prediction step {i}: {str(e)}")
         
         return np.array(predictions)
     

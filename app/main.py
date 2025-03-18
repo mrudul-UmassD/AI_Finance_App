@@ -5,6 +5,7 @@ import plotly.graph_objects as go
 from datetime import datetime, timedelta
 import time
 import random
+import numpy as np
 
 # Import our utils first to handle numpy compatibility
 try:
@@ -269,50 +270,69 @@ with st.spinner("Training prediction model..."):
             st.warning("Not enough historical data for reliable prediction. Need at least 50 days of data.")
             predictions = None
         else:
-            model = PricePredictionModel()
-            # Limit the window size to avoid errors with small datasets
-            model.window_size = min(20, len(data) // 3)
-            model.train(data)
-            
-            # Make predictions
-            predictions = model.predict(data, future_days=30)
-            
-            # Create dates for prediction
-            last_date = data.index[0]
-            future_dates = [last_date + timedelta(days=i+1) for i in range(30)]
-            
-            # Display prediction chart
-            fig = go.Figure()
-            
-            # Historical data
-            fig.add_trace(go.Scatter(
-                x=data.index,
-                y=data['Close'],
-                mode='lines',
-                name='Historical Data'
-            ))
-            
-            # Predictions
-            fig.add_trace(go.Scatter(
-                x=future_dates,
-                y=predictions,
-                mode='lines',
-                line=dict(dash='dash'),
-                name='Predictions'
-            ))
-            
-            fig.update_layout(
-                title=f"{ticker} 30-Day Price Prediction",
-                xaxis_title="Date",
-                yaxis_title="Price (USD)",
-                height=500
-            )
-            
-            st.plotly_chart(fig, use_container_width=True)
-            
-            # Show prediction metrics
-            st.metric("Prediction Accuracy", f"{model.accuracy:.2f}%")
-            st.caption("Note: Predictions are based on historical patterns and technical indicators. Always conduct your own research before making investment decisions.")
+            try:
+                # Reset the index on the data to avoid KeyError issues
+                model_data = data.copy().reset_index()
+                
+                # Ensure we have a 'Close' column
+                if 'Close' not in model_data.columns:
+                    st.error("Missing 'Close' price data required for predictions.")
+                    predictions = None
+                else:
+                    model = PricePredictionModel()
+                    # Limit the window size to avoid errors with small datasets
+                    model.window_size = min(10, max(5, len(model_data) // 5))  # Use at most 1/5 of data points, between 5-10
+                    
+                    try:
+                        model.train(model_data)
+                        
+                        # Make predictions
+                        predictions = model.predict(model_data, future_days=30)
+                        
+                        # Create dates for prediction
+                        last_date = data.index[0]
+                        future_dates = [last_date + timedelta(days=i+1) for i in range(30)]
+                        
+                        # Display prediction chart
+                        fig = go.Figure()
+                        
+                        # Historical data
+                        fig.add_trace(go.Scatter(
+                            x=data.index,
+                            y=data['Close'],
+                            mode='lines',
+                            name='Historical Data'
+                        ))
+                        
+                        # Predictions
+                        fig.add_trace(go.Scatter(
+                            x=future_dates,
+                            y=predictions,
+                            mode='lines',
+                            line=dict(dash='dash'),
+                            name='Predictions'
+                        ))
+                        
+                        fig.update_layout(
+                            title=f"{ticker} 30-Day Price Prediction",
+                            xaxis_title="Date",
+                            yaxis_title="Price (USD)",
+                            height=500
+                        )
+                        
+                        st.plotly_chart(fig, use_container_width=True)
+                        
+                        # Show prediction metrics
+                        st.metric("Prediction Accuracy", f"{model.accuracy:.2f}%")
+                        st.caption("Note: Predictions are based on historical patterns and technical indicators. Always conduct your own research before making investment decisions.")
+                    except Exception as e:
+                        st.error(f"Error training model: {str(e)}")
+                        import traceback
+                        st.error(f"Training error details: {traceback.format_exc()}")
+                        predictions = None
+            except Exception as e:
+                st.error(f"Error preparing data for prediction: {str(e)}")
+                predictions = None
         
     except Exception as e:
         st.error(f"Error in price prediction: {str(e)}")
@@ -325,12 +345,29 @@ st.subheader("Investment Recommendation")
 
 try:
     # Generate a simple recommendation based on technical signals, sentiment and risk profile
+    # Define default values for all variables to avoid errors
+    technical_score = 0.0
+    overall_sentiment = 0.0
+    prediction_trend = 0.0
+    buy_count = sell_count = hold_count = 0
+
     # Make sure signals exists and is not empty
     if 'signals' in locals() and signals and len(signals) > 0:
-        recent_signals = signals[:7] if len(signals) >= 7 else signals  # Last week of signals
-        buy_count = sum(1 for s in recent_signals if s == 'buy')
-        sell_count = sum(1 for s in recent_signals if s == 'sell')
-        hold_count = sum(1 for s in recent_signals if s == 'hold')
+        # Convert to a plain Python list if it's not already one
+        if not isinstance(signals, list):
+            signals_list = signals.tolist() if hasattr(signals, 'tolist') else list(signals)
+        else:
+            signals_list = signals
+            
+        # Use slicing in a safe way
+        try:
+            recent_signals = signals_list[:7] if len(signals_list) >= 7 else signals_list  # Last week of signals
+            buy_count = sum(1 for s in recent_signals if s == 'buy')
+            sell_count = sum(1 for s in recent_signals if s == 'sell')
+            hold_count = sum(1 for s in recent_signals if s == 'hold')
+        except Exception as e:
+            st.warning(f"Error processing signals: {e}. Using default values.")
+            buy_count = sell_count = hold_count = 1  # neutral starting point
     else:
         # Default values if no signals available
         buy_count = sell_count = hold_count = 1  # neutral starting point
@@ -344,9 +381,15 @@ try:
         prediction_trend = 0.0  # neutral trend
     else:
         # Get prediction trend (positive or negative)
-        pred_start = predictions[0]
-        pred_end = predictions[-1]
-        prediction_trend = (pred_end - pred_start) / pred_start if pred_start != 0 else 0
+        try:
+            # Convert to NumPy array if it's not already one
+            predictions_array = np.array(predictions)
+            pred_start = predictions_array[0]
+            pred_end = predictions_array[-1]
+            prediction_trend = (pred_end - pred_start) / pred_start if pred_start != 0 else 0
+        except Exception as e:
+            st.warning(f"Error calculating prediction trend: {e}. Using default value.")
+            prediction_trend = 0.0
     
     # Convert risk tolerance to numerical value
     risk_scores = {
