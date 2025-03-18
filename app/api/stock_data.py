@@ -1,6 +1,15 @@
 import yfinance as yf
 import pandas as pd
-import numpy as np
+try:
+    from app.utils.numpy_compat import get_nan, is_nan, safe_divide
+except ImportError:
+    try:
+        from utils.numpy_compat import get_nan, is_nan, safe_divide
+    except ImportError:
+        # Fallback implementations
+        def get_nan(): return float('nan')
+        def is_nan(x): return x != x
+        def safe_divide(a, b): return a / b if b != 0 else get_nan()
 import requests
 from bs4 import BeautifulSoup
 import re
@@ -149,7 +158,7 @@ def scrape_stock_data(ticker, days):
                 try:
                     return float(val.replace(',', ''))
                 except:
-                    return np.nan
+                    return get_nan()
             
             try:
                 open_price = safe_parse(columns[1].text.strip())
@@ -463,10 +472,10 @@ def get_mock_stock_info(ticker):
             'longName': f'{ticker} Inc.',
             'sector': 'Unknown',
             'industry': 'Unknown',
-            'forwardPE': np.random.uniform(15, 35),
-            'dividendYield': np.random.uniform(0, 3),
-            'beta': np.random.uniform(0.8, 1.5),
-            'pegRatio': np.random.uniform(1, 3)
+            'forwardPE': random.uniform(15, 35),
+            'dividendYield': random.uniform(0, 3),
+            'beta': random.uniform(0.8, 1.5),
+            'pegRatio': random.uniform(1, 3)
         }
 
 def get_related_stocks(ticker, sector=True):

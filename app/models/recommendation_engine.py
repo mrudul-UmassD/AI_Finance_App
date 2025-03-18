@@ -1,4 +1,4 @@
-import numpy as np
+import random
 from datetime import datetime, timedelta
 
 class RecommendationEngine:
@@ -477,7 +477,7 @@ class RecommendationEngine:
             return sentiments[ticker]
         else:
             # Generate a random sentiment between -0.5 and 0.5
-            return np.random.uniform(-0.5, 0.5)
+            return random.uniform(-0.5, 0.5)
     
     def _get_mock_stock_info(self, ticker):
         """
@@ -556,8 +556,8 @@ class RecommendationEngine:
                 'longName': f'{ticker} Inc.',
                 'sector': 'Unknown',
                 'industry': 'Unknown',
-                'forwardPE': np.random.uniform(15, 35),
-                'dividendYield': np.random.uniform(0, 3),
-                'beta': np.random.uniform(0.8, 1.5),
-                'pegRatio': np.random.uniform(1, 3)
+                'forwardPE': random.uniform(15, 35),
+                'dividendYield': random.uniform(0, 3),
+                'beta': random.uniform(0.8, 1.5),
+                'pegRatio': random.uniform(1, 3)
             } 

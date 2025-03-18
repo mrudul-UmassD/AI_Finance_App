@@ -7,23 +7,94 @@ This script launches the AI Financial Advisor application.
 import os
 import sys
 import subprocess
+import time
 
 def main():
     """Main function to run the application"""
     try:
+        print("🚀 Setting up AI Financial Advisor...")
+        
         # Check if required packages are installed
         subprocess.check_call([sys.executable, "-m", "pip", "install", "-r", "requirements.txt"])
         print("✅ Dependencies installed successfully")
         
-        # Check if technical_indicators.py exists, create it if not
+        # Need to make sure numpy is properly installed before trying to use it
+        print("🔍 Verifying numpy installation...")
+        try:
+            import numpy as np
+            print(f"✅ NumPy version {np.__version__} loaded successfully")
+        except ImportError:
+            print("⚠️ NumPy not found, reinstalling...")
+            subprocess.check_call([sys.executable, "-m", "pip", "install", "--force-reinstall", "numpy==1.26.2"])
+            print("✅ NumPy reinstalled")
+            time.sleep(1)  # Give a moment for the installation to settle
+        
+        # Make sure utils directory exists
         utils_dir = os.path.join("app", "utils")
+        os.makedirs(utils_dir, exist_ok=True)
+        
+        # Check if numpy_compat.py exists, create it if not
+        numpy_compat_file = os.path.join(utils_dir, "numpy_compat.py")
+        if not os.path.exists(numpy_compat_file):
+            print("⚠️ Creating numpy_compat.py for better compatibility...")
+            with open(numpy_compat_file, "w") as f:
+                f.write('''"""
+Compatibility module for numpy functions to ensure compatibility with different Python versions
+"""
+
+def is_nan(value):
+    """
+    Check if a value is NaN in a way that's compatible with all numpy versions
+    """
+    try:
+        # Try to compare with itself - NaN is the only value that doesn't equal itself
+        return value != value
+    except:
+        # If comparison fails, it's not a NaN
+        return False
+
+def get_nan():
+    """
+    Get a NaN value in a way that's compatible with all numpy versions
+    """
+    try:
+        import numpy as np
+        return np.nan
+    except (ImportError, AttributeError):
+        # Fallback to create NaN without numpy
+        return float('nan')
+
+def safe_divide(a, b):
+    """
+    Safe division that returns NaN on divide by zero
+    """
+    try:
+        if b == 0:
+            return get_nan()
+        return a / b
+    except:
+        return get_nan()
+''')
+            print("✅ Created numpy_compat.py")
+        
+        # Check if technical_indicators.py exists, create it if not
         tech_indicators_file = os.path.join(utils_dir, "technical_indicators.py")
         
         if not os.path.exists(tech_indicators_file):
             print("⚠️ Creating missing technical_indicators.py file...")
             with open(tech_indicators_file, "w") as f:
                 f.write("""import pandas as pd
-import numpy as np
+# Import our utils for numpy compatibility
+try:
+    from app.utils.numpy_compat import get_nan, is_nan, safe_divide
+except ImportError:
+    try:
+        from utils.numpy_compat import get_nan, is_nan, safe_divide
+    except ImportError:
+        # Fallback implementations
+        def get_nan(): return float('nan')
+        def is_nan(x): return x != x
+        def safe_divide(a, b): return a / b if b != 0 else get_nan()
 
 def calculate_indicators(data):
     \"\"\"
@@ -65,7 +136,7 @@ def calculate_indicators(data):
     avg_gain = gain.rolling(window=14).mean()
     avg_loss = loss.rolling(window=14).mean()
     
-    rs = avg_gain / avg_loss
+    rs = safe_divide(avg_gain, avg_loss)
     df['RSI_14'] = 100 - (100 / (1 + rs))
     
     # Bollinger Bands
@@ -75,7 +146,7 @@ def calculate_indicators(data):
     df['BB_Lower'] = df['BB_Middle'] - (std_dev * 2)
     
     # Percentage Price Oscillator
-    df['PPO'] = ((df['EMA_12'] - df['EMA_26']) / df['EMA_26']) * 100
+    df['PPO'] = safe_divide((df['EMA_12'] - df['EMA_26']), df['EMA_26']) * 100
     
     # Average Directional Index
     plus_dm = df['High'].diff()
@@ -91,10 +162,10 @@ def calculate_indicators(data):
     tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
     atr = tr.rolling(window=14).mean()
     
-    plus_di = 100 * (plus_dm.rolling(window=14).mean() / atr)
-    minus_di = 100 * (minus_dm.rolling(window=14).mean() / atr)
+    plus_di = 100 * safe_divide(plus_dm.rolling(window=14).mean(), atr)
+    minus_di = 100 * safe_divide(minus_dm.rolling(window=14).mean(), atr)
     
-    dx = 100 * (abs(plus_di - minus_di) / (plus_di + minus_di))
+    dx = 100 * safe_divide(abs(plus_di - minus_di), (plus_di + minus_di))
     df['ADX'] = dx.rolling(window=14).mean()
     
     # Return indicators DataFrame with most recent values first

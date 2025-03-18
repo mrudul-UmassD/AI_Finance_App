@@ -1,20 +1,33 @@
 import streamlit as st
 import pandas as pd
-import numpy as np
 import matplotlib.pyplot as plt
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
 import time
+import random
 
-# Import our modules
+# Import our utils first to handle numpy compatibility
+try:
+    from app.utils.numpy_compat import get_nan, is_nan, safe_divide
+except ImportError:
+    try:
+        from utils.numpy_compat import get_nan, is_nan, safe_divide
+    except ImportError:
+        # Fallback implementations
+        def get_nan(): return float('nan')
+        def is_nan(x): return x != x
+        def safe_divide(a, b): return a / b if b != 0 else get_nan()
+
+# Now import the rest of our modules
 try:
     from app.api.stock_data import get_stock_data, get_stock_info
     from app.api.news_data import get_financial_news
     from app.utils.technical_indicators import calculate_indicators, generate_signals
     from app.models.sentiment_analysis import SentimentAnalyzer
     from app.models.price_prediction import PricePredictionModel
+    from app.models.recommendation_engine import RecommendationEngine
 except ImportError as e:
-    st.error(f"Error importing modules: {str(e)}")
+    st.error(f"Error importing modules from app package: {str(e)}")
     # Try alternative import paths
     try:
         from api.stock_data import get_stock_data, get_stock_info
@@ -22,6 +35,7 @@ except ImportError as e:
         from utils.technical_indicators import calculate_indicators, generate_signals
         from models.sentiment_analysis import SentimentAnalyzer
         from models.price_prediction import PricePredictionModel
+        from models.recommendation_engine import RecommendationEngine
     except ImportError as e2:
         st.error(f"Alternative import also failed: {str(e2)}")
         st.stop()
@@ -179,17 +193,24 @@ with st.spinner("Calculating technical indicators..."):
         col1, col2, col3 = st.columns(3)
         
         with col1:
-            st.metric("RSI (14)", f"{indicators['RSI_14'].iloc[0]:.2f}",
-                     "Oversold" if indicators['RSI_14'].iloc[0] < 30 else 
-                     "Overbought" if indicators['RSI_14'].iloc[0] > 70 else "Neutral")
+            rsi_value = indicators['RSI_14'].iloc[0] if 'RSI_14' in indicators else 0
+            rsi_status = "Oversold" if rsi_value < 30 else "Overbought" if rsi_value > 70 else "Neutral"
+            st.metric("RSI (14)", f"{rsi_value:.2f}", rsi_status)
             
         with col2:
-            st.metric("MACD", f"{indicators['MACD'].iloc[0]:.2f}",
-                     f"{indicators['MACD'].iloc[0] - indicators['MACD_Signal'].iloc[0]:.2f}")
+            macd_value = indicators['MACD'].iloc[0] if 'MACD' in indicators else 0
+            macd_signal = indicators['MACD_Signal'].iloc[0] if 'MACD_Signal' in indicators else 0
+            macd_diff = macd_value - macd_signal
+            st.metric("MACD", f"{macd_value:.2f}", f"{macd_diff:.2f}")
             
         with col3:
-            st.metric("Bollinger Band Width", 
-                     f"{(indicators['BB_Upper'].iloc[0] - indicators['BB_Lower'].iloc[0]) / indicators['BB_Middle'].iloc[0] * 100:.2f}%")
+            bb_upper = indicators['BB_Upper'].iloc[0] if 'BB_Upper' in indicators else 0
+            bb_lower = indicators['BB_Lower'].iloc[0] if 'BB_Lower' in indicators else 0
+            bb_middle = indicators['BB_Middle'].iloc[0] if 'BB_Middle' in indicators else 1
+            
+            # Use safe division to avoid divide by zero
+            bb_width = ((bb_upper - bb_lower) / bb_middle * 100) if bb_middle != 0 else 0
+            st.metric("Bollinger Band Width", f"{bb_width:.2f}%")
             
     except Exception as e:
         st.error(f"Error in technical analysis: {str(e)}")
@@ -327,7 +348,7 @@ try:
     # Get prediction trend (positive or negative)
     pred_start = predictions[0]
     pred_end = predictions[-1]
-    prediction_trend = (pred_end - pred_start) / pred_start
+    prediction_trend = (pred_end - pred_start) / pred_start if pred_start != 0 else 0
     
     # Weight components based on risk profile
     if risk_score <= 2:  # Conservative
@@ -401,6 +422,24 @@ try:
     with col3:
         st.metric("Price Trend (30d)", f"{prediction_trend*100:.2f}%", 
                  "Upward" if prediction_trend > 0 else "Downward")
+    
+    # Get more detailed recommendations from the engine
+    try:
+        engine = RecommendationEngine()
+        recommendations = engine.get_recommendations(ticker, risk_tolerance)
+        
+        # Display detailed recommendations
+        st.subheader("Detailed Recommendations")
+        for rec in recommendations[:3]:  # Show top 3 recommendations
+            st.markdown(f"""
+            <div style="padding: 10px; border-radius: 5px; margin-bottom: 10px; background-color: rgba(0,0,0,0.05);">
+                <h4>{rec['title']}</h4>
+                <p>{rec['description']}</p>
+                <p><small>Confidence: {rec['confidence']*100:.0f}%</small></p>
+            </div>
+            """, unsafe_allow_html=True)
+    except Exception as e:
+        st.warning(f"Could not load detailed recommendations: {str(e)}")
     
     # Add disclaimer
     st.caption("**Disclaimer:** This recommendation is generated by an AI model based on historical data analysis and should be used for informational purposes only. Always consult with a professional financial advisor before making investment decisions.")

@@ -1,5 +1,15 @@
 import pandas as pd
-import numpy as np
+# Replace numpy import with our numpy_compat module
+try:
+    from app.utils.numpy_compat import get_nan, is_nan, safe_divide
+except ImportError:
+    try:
+        from utils.numpy_compat import get_nan, is_nan, safe_divide
+    except ImportError:
+        # Fallback implementations
+        def get_nan(): return float('nan')
+        def is_nan(x): return x != x
+        def safe_divide(a, b): return a / b if b != 0 else get_nan()
 import pandas_ta as ta
 
 def calculate_indicators(data):

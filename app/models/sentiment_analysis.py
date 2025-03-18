@@ -1,5 +1,4 @@
 import nltk
-import numpy as np
 from nltk.sentiment.vader import SentimentIntensityAnalyzer
 from nltk.tokenize import word_tokenize
 from nltk.corpus import stopwords

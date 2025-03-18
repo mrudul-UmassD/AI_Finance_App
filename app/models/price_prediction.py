@@ -1,5 +1,19 @@
 import pandas as pd
+# Replace numpy import with our numpy_compat module
+try:
+    from app.utils.numpy_compat import get_nan, is_nan, safe_divide
+except ImportError:
+    try:
+        from utils.numpy_compat import get_nan, is_nan, safe_divide
+    except ImportError:
+        # Fallback implementations
+        def get_nan(): return float('nan')
+        def is_nan(x): return x != x
+        def safe_divide(a, b): return a / b if b != 0 else get_nan()
+
+# For numpy functions we need to use, import them carefully
 import numpy as np
+
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.linear_model import LinearRegression
 from sklearn.ensemble import RandomForestRegressor
@@ -114,7 +128,7 @@ class PricePredictionModel:
         
         # Calculate a simplified accuracy percentage
         # Using Mean Absolute Percentage Error (MAPE)
-        mape = np.mean(np.abs((y_test - y_pred) / y_test)) * 100
+        mape = np.mean(np.abs(safe_divide(y_test - y_pred, y_test))) * 100
         self.accuracy = 100 - mape  # Convert error to accuracy
         
         # Set trained flag
@@ -221,7 +235,7 @@ class PricePredictionModel:
         # Calculate evaluation metrics
         mae = mean_absolute_error(validation_data, predictions)
         rmse = np.sqrt(mean_squared_error(validation_data, predictions))
-        mape = np.mean(np.abs((validation_data - predictions) / validation_data)) * 100
+        mape = np.mean(np.abs(safe_divide(validation_data - predictions, validation_data))) * 100
         
         return {
             'mae': mae,
