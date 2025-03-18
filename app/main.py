@@ -264,61 +264,89 @@ st.subheader("Price Prediction (30 Days)")
 
 with st.spinner("Training prediction model..."):
     try:
-        model = PricePredictionModel()
-        model.train(data)
-        
-        # Make predictions
-        predictions = model.predict(data, future_days=30)
-        
-        # Create dates for prediction
-        last_date = data.index[0]
-        future_dates = [last_date + timedelta(days=i+1) for i in range(30)]
-        
-        # Display prediction chart
-        fig = go.Figure()
-        
-        # Historical data
-        fig.add_trace(go.Scatter(
-            x=data.index,
-            y=data['Close'],
-            mode='lines',
-            name='Historical Data'
-        ))
-        
-        # Predictions
-        fig.add_trace(go.Scatter(
-            x=future_dates,
-            y=predictions,
-            mode='lines',
-            line=dict(dash='dash'),
-            name='Predictions'
-        ))
-        
-        fig.update_layout(
-            title=f"{ticker} 30-Day Price Prediction",
-            xaxis_title="Date",
-            yaxis_title="Price (USD)",
-            height=500
-        )
-        
-        st.plotly_chart(fig, use_container_width=True)
-        
-        # Show prediction metrics
-        st.metric("Prediction Accuracy", f"{model.accuracy:.2f}%")
-        st.caption("Note: Predictions are based on historical patterns and technical indicators. Always conduct your own research before making investment decisions.")
+        # Check if we have enough data for prediction
+        if len(data) < 50:  # Require at least 50 data points
+            st.warning("Not enough historical data for reliable prediction. Need at least 50 days of data.")
+            predictions = None
+        else:
+            model = PricePredictionModel()
+            # Limit the window size to avoid errors with small datasets
+            model.window_size = min(20, len(data) // 3)
+            model.train(data)
+            
+            # Make predictions
+            predictions = model.predict(data, future_days=30)
+            
+            # Create dates for prediction
+            last_date = data.index[0]
+            future_dates = [last_date + timedelta(days=i+1) for i in range(30)]
+            
+            # Display prediction chart
+            fig = go.Figure()
+            
+            # Historical data
+            fig.add_trace(go.Scatter(
+                x=data.index,
+                y=data['Close'],
+                mode='lines',
+                name='Historical Data'
+            ))
+            
+            # Predictions
+            fig.add_trace(go.Scatter(
+                x=future_dates,
+                y=predictions,
+                mode='lines',
+                line=dict(dash='dash'),
+                name='Predictions'
+            ))
+            
+            fig.update_layout(
+                title=f"{ticker} 30-Day Price Prediction",
+                xaxis_title="Date",
+                yaxis_title="Price (USD)",
+                height=500
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Show prediction metrics
+            st.metric("Prediction Accuracy", f"{model.accuracy:.2f}%")
+            st.caption("Note: Predictions are based on historical patterns and technical indicators. Always conduct your own research before making investment decisions.")
         
     except Exception as e:
         st.error(f"Error in price prediction: {str(e)}")
+        import traceback
+        st.error(f"Details: {traceback.format_exc()}")
+        predictions = None
 
 # Investment Recommendation
 st.subheader("Investment Recommendation")
 
 try:
     # Generate a simple recommendation based on technical signals, sentiment and risk profile
-    recent_signals = signals[:7]  # Last week of signals
-    buy_count = sum(1 for s in recent_signals if s == 'buy')
-    sell_count = sum(1 for s in recent_signals if s == 'sell')
-    hold_count = sum(1 for s in recent_signals if s == 'hold')
+    # Make sure signals exists and is not empty
+    if 'signals' in locals() and signals and len(signals) > 0:
+        recent_signals = signals[:7] if len(signals) >= 7 else signals  # Last week of signals
+        buy_count = sum(1 for s in recent_signals if s == 'buy')
+        sell_count = sum(1 for s in recent_signals if s == 'sell')
+        hold_count = sum(1 for s in recent_signals if s == 'hold')
+    else:
+        # Default values if no signals available
+        buy_count = sell_count = hold_count = 1  # neutral starting point
+        
+    # Make sure overall_sentiment exists and is not None
+    if 'overall_sentiment' not in locals() or overall_sentiment is None:
+        overall_sentiment = 0.0  # neutral sentiment
+    
+    # Make sure predictions exists and is not None
+    if 'predictions' not in locals() or predictions is None:
+        prediction_trend = 0.0  # neutral trend
+    else:
+        # Get prediction trend (positive or negative)
+        pred_start = predictions[0]
+        pred_end = predictions[-1]
+        prediction_trend = (pred_end - pred_start) / pred_start if pred_start != 0 else 0
     
     # Convert risk tolerance to numerical value
     risk_scores = {
@@ -344,11 +372,6 @@ try:
     # Calculate overall score weighted by risk profile
     # Higher risk tolerance gives more weight to sentiment
     # Longer horizon gives more weight to prediction trend
-    
-    # Get prediction trend (positive or negative)
-    pred_start = predictions[0]
-    pred_end = predictions[-1]
-    prediction_trend = (pred_end - pred_start) / pred_start if pred_start != 0 else 0
     
     # Weight components based on risk profile
     if risk_score <= 2:  # Conservative
@@ -428,16 +451,25 @@ try:
         engine = RecommendationEngine()
         recommendations = engine.get_recommendations(ticker, risk_tolerance)
         
-        # Display detailed recommendations
-        st.subheader("Detailed Recommendations")
-        for rec in recommendations[:3]:  # Show top 3 recommendations
-            st.markdown(f"""
-            <div style="padding: 10px; border-radius: 5px; margin-bottom: 10px; background-color: rgba(0,0,0,0.05);">
-                <h4>{rec['title']}</h4>
-                <p>{rec['description']}</p>
-                <p><small>Confidence: {rec['confidence']*100:.0f}%</small></p>
-            </div>
-            """, unsafe_allow_html=True)
+        # Make sure we have valid recommendations
+        if recommendations and isinstance(recommendations, list):
+            # Display detailed recommendations
+            st.subheader("Detailed Recommendations")
+            # Get up to 3 recommendations, but handle case where we have fewer
+            num_to_show = min(3, len(recommendations))
+            for rec in recommendations[:num_to_show]:
+                # Verify the recommendation has the required fields
+                if isinstance(rec, dict) and 'title' in rec and 'description' in rec:
+                    confidence = rec.get('confidence', 0.5) * 100  # Default 50% if missing
+                    st.markdown(f"""
+                    <div style="padding: 10px; border-radius: 5px; margin-bottom: 10px; background-color: rgba(0,0,0,0.05);">
+                        <h4>{rec['title']}</h4>
+                        <p>{rec['description']}</p>
+                        <p><small>Confidence: {confidence:.0f}%</small></p>
+                    </div>
+                    """, unsafe_allow_html=True)
+        else:
+            st.warning("No detailed recommendations available.")
     except Exception as e:
         st.warning(f"Could not load detailed recommendations: {str(e)}")
     

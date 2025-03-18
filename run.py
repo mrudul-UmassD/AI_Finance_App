@@ -29,6 +29,26 @@ def main():
             print("✅ NumPy reinstalled")
             time.sleep(1)  # Give a moment for the installation to settle
         
+        # Make sure NLTK resources are installed
+        try:
+            print("🔍 Setting up NLTK resources...")
+            import nltk
+            nltk_data_path = os.path.join(os.path.expanduser("~"), "nltk_data")
+            os.makedirs(nltk_data_path, exist_ok=True)
+            
+            # Download essential resources
+            for resource in ['vader_lexicon', 'punkt', 'stopwords']:
+                try:
+                    nltk.data.find(f"{resource}")
+                    print(f"✅ NLTK resource '{resource}' already available")
+                except LookupError:
+                    print(f"⚠️ Downloading NLTK resource '{resource}'...")
+                    nltk.download(resource, quiet=True, download_dir=nltk_data_path)
+                    print(f"✅ Downloaded NLTK resource '{resource}'")
+        except Exception as e:
+            print(f"⚠️ Warning: Error setting up NLTK: {str(e)}")
+            print("⚠️ The application may have limited functionality without NLTK resources.")
+        
         # Make sure utils directory exists
         utils_dir = os.path.join("app", "utils")
         os.makedirs(utils_dir, exist_ok=True)

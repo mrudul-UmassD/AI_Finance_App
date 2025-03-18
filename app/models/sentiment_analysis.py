@@ -3,6 +3,7 @@ from nltk.sentiment.vader import SentimentIntensityAnalyzer
 from nltk.tokenize import word_tokenize
 from nltk.corpus import stopwords
 import re
+import os
 
 class SentimentAnalyzer:
     """
@@ -20,26 +21,31 @@ class SentimentAnalyzer:
         """
         self.model_type = 'vader'  # Force vader for lightweight version
         
+        # Make sure NLTK data path exists
+        nltk_data_path = os.path.join(os.path.expanduser("~"), "nltk_data")
+        os.makedirs(nltk_data_path, exist_ok=True)
+        
+        # Download all required resources
+        resources = ['vader_lexicon', 'punkt', 'stopwords']
+        for resource in resources:
+            try:
+                nltk.data.find(f"{resource}")
+            except LookupError:
+                print(f"Downloading {resource} for NLTK...")
+                nltk.download(resource, quiet=True, download_dir=nltk_data_path)
+        
         # Initialize VADER sentiment analyzer
         try:
             self.vader = SentimentIntensityAnalyzer()
-        except:
-            # If resources not downloaded, download them
-            nltk.download('vader_lexicon', quiet=True)
-            self.vader = SentimentIntensityAnalyzer()
-        
-        # Download other NLTK resources if using text preprocessing
-        try:
-            nltk.data.find('tokenizers/punkt')
-        except LookupError:
-            nltk.download('punkt', quiet=True)
-        
-        try:
-            nltk.data.find('corpora/stopwords')
-        except LookupError:
-            nltk.download('stopwords', quiet=True)
+        except Exception as e:
+            print(f"Error initializing SentimentIntensityAnalyzer: {str(e)}")
+            raise
             
-        self.stop_words = set(stopwords.words('english'))
+        try:
+            self.stop_words = set(stopwords.words('english'))
+        except Exception as e:
+            print(f"Error loading stopwords: {str(e)}")
+            self.stop_words = set()
         
         # Financial domain-specific lexicon
         self.financial_lexicon = {
@@ -135,23 +141,31 @@ class SentimentAnalyzer:
         float
             Sentiment score (-1 to 1, where -1 is very negative, 0 is neutral, 1 is very positive)
         """
-        # Preprocess text
-        preprocessed_text = self._preprocess_text(text)
-        
-        if not preprocessed_text:
-            return 0.0  # Neutral if no text
-        
-        # Get base sentiment from VADER
-        base_sentiment = self._vader_sentiment(preprocessed_text)
-        
-        # Enhance with finance-specific sentiment
-        finance_sentiment = self._financial_sentiment(preprocessed_text)
-        
-        # Weighted combination
-        combined_sentiment = 0.7 * base_sentiment + 0.3 * finance_sentiment
-        
-        # Ensure within range [-1, 1]
-        return max(-1.0, min(1.0, combined_sentiment))
+        try:
+            # Handle None or empty text
+            if text is None or not text.strip():
+                return 0.0  # Neutral if no text
+                
+            # Preprocess text
+            preprocessed_text = self._preprocess_text(text)
+            
+            if not preprocessed_text:
+                return 0.0  # Neutral if no text
+            
+            # Get base sentiment from VADER
+            base_sentiment = self._vader_sentiment(preprocessed_text)
+            
+            # Enhance with finance-specific sentiment
+            finance_sentiment = self._financial_sentiment(preprocessed_text)
+            
+            # Weighted combination
+            combined_sentiment = 0.7 * base_sentiment + 0.3 * finance_sentiment
+            
+            # Ensure within range [-1, 1]
+            return max(-1.0, min(1.0, combined_sentiment))
+        except Exception as e:
+            print(f"Error in sentiment analysis: {str(e)}")
+            return 0.0  # Return neutral on error
     
     def _vader_sentiment(self, text):
         """

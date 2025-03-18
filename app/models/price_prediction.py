@@ -95,16 +95,33 @@ class PricePredictionModel:
         data = stock_data.copy()
         data = data[['Close']]
         
+        # Adjust window size based on available data
+        min_data_points = 30  # absolute minimum required
+        if len(data) < min_data_points:
+            raise ValueError(f"Not enough data to train model. Need at least {min_data_points} data points, but got {len(data)}.")
+            
+        # Adjust window size if needed
+        if len(data) < self.window_size * 2:
+            self.window_size = max(5, len(data) // 4)  # Use at most 1/4 of data for window
+        
         # Create features
         X, y = self._create_features(data)
         
-        if len(X) < self.window_size + 10:
-            raise ValueError(f"Not enough data to train model. Need at least {self.window_size + 10} data points.")
+        if len(X) < 10:  # Need at least 10 rows after feature creation
+            raise ValueError(f"Not enough usable data points after feature creation. Got {len(X)} rows.")
         
         # Split data into train and test sets (80/20)
-        split_idx = int(len(X) * 0.8)
+        # For very small datasets, use more data for training
+        train_percent = 0.9 if len(X) < 30 else 0.8
+        split_idx = int(len(X) * train_percent)
         X_train, X_test = X[:split_idx], X[split_idx:]
         y_train, y_test = y[:split_idx], y[split_idx:]
+        
+        # Handle cases where test set might be empty
+        if len(X_test) == 0:
+            split_idx = max(1, int(len(X) * 0.7))
+            X_train, X_test = X[:split_idx], X[split_idx:]
+            y_train, y_test = y[:split_idx], y[split_idx:]
         
         # Scale features
         X_train_scaled = self.scaler.fit_transform(X_train)
@@ -114,7 +131,9 @@ class PricePredictionModel:
         if self.model_type == 'linear':
             self.model = LinearRegression()
         else:  # random_forest
-            self.model = RandomForestRegressor(n_estimators=100, random_state=42)
+            # Use fewer estimators for smaller datasets
+            n_estimators = min(100, max(10, len(X_train) // 2))
+            self.model = RandomForestRegressor(n_estimators=n_estimators, random_state=42)
         
         self.model.fit(X_train_scaled, y_train)
         
@@ -129,7 +148,8 @@ class PricePredictionModel:
         # Calculate a simplified accuracy percentage
         # Using Mean Absolute Percentage Error (MAPE)
         mape = np.mean(np.abs(safe_divide(y_test - y_pred, y_test))) * 100
-        self.accuracy = 100 - mape  # Convert error to accuracy
+        # Clip accuracy to reasonable range (0-100%)
+        self.accuracy = max(0, min(100, 100 - mape))
         
         # Set trained flag
         self.trained = True
