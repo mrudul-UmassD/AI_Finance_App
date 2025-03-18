@@ -1,211 +1,143 @@
-import pandas as pd
 import numpy as np
-from api.stock_data import get_stock_data, get_stock_info, get_related_stocks
-from utils.technical_indicators import calculate_indicators, generate_signals, identify_patterns
+from datetime import datetime, timedelta
 
 class RecommendationEngine:
     """
-    Investment recommendation engine based on technical analysis, sentiment, and user risk profile
+    Generates investment recommendations based on technical analysis, sentiment, and user profile
     """
     
     def __init__(self):
         """Initialize the recommendation engine"""
-        # Risk profile weights
-        self.risk_weights = {
-            'Very Low': {
-                'technical': 0.2,
-                'sentiment': 0.1,
-                'fundamental': 0.7
+        self.risk_profiles = {
+            "Very Low": {
+                "technical_weight": 0.3,
+                "sentiment_weight": 0.1,
+                "prediction_weight": 0.2,
+                "fundamental_weight": 0.4
             },
-            'Low': {
-                'technical': 0.3,
-                'sentiment': 0.2,
-                'fundamental': 0.5
+            "Low": {
+                "technical_weight": 0.3,
+                "sentiment_weight": 0.15,
+                "prediction_weight": 0.25,
+                "fundamental_weight": 0.3
             },
-            'Medium': {
-                'technical': 0.4,
-                'sentiment': 0.3,
-                'fundamental': 0.3
+            "Medium": {
+                "technical_weight": 0.3,
+                "sentiment_weight": 0.2,
+                "prediction_weight": 0.3,
+                "fundamental_weight": 0.2
             },
-            'High': {
-                'technical': 0.5,
-                'sentiment': 0.3,
-                'fundamental': 0.2
+            "High": {
+                "technical_weight": 0.25,
+                "sentiment_weight": 0.25,
+                "prediction_weight": 0.35,
+                "fundamental_weight": 0.15
             },
-            'Very High': {
-                'technical': 0.6,
-                'sentiment': 0.3,
-                'fundamental': 0.1
+            "Very High": {
+                "technical_weight": 0.2,
+                "sentiment_weight": 0.3,
+                "prediction_weight": 0.4,
+                "fundamental_weight": 0.1
             }
         }
-        
-        # Investment strategies by risk profile
-        self.strategies = {
-            'Very Low': [
-                {
-                    'title': 'Conservative Income Strategy',
-                    'description': 'Focus on stable dividend stocks and income-generating assets with minimal risk.',
-                    'allocation': {'stocks': 30, 'bonds': 60, 'cash': 10},
-                    'timeframe': 'Long-term (5+ years)',
-                    'tags': ['dividend', 'income', 'blue-chip']
-                },
-                {
-                    'title': 'Capital Preservation Strategy',
-                    'description': 'Prioritize protecting capital with high-quality bonds and dividend aristocrats.',
-                    'allocation': {'stocks': 20, 'bonds': 70, 'cash': 10},
-                    'timeframe': 'Long-term (5+ years)',
-                    'tags': ['preservation', 'stability', 'dividend']
-                }
-            ],
-            'Low': [
-                {
-                    'title': 'Balanced Income Strategy',
-                    'description': 'Balanced approach with focus on stable growth stocks and income from bonds.',
-                    'allocation': {'stocks': 50, 'bonds': 40, 'cash': 10},
-                    'timeframe': 'Medium to Long-term (3-5+ years)',
-                    'tags': ['balance', 'income', 'growth']
-                },
-                {
-                    'title': 'Value Investing Strategy',
-                    'description': 'Focus on undervalued companies with strong fundamentals and steady growth.',
-                    'allocation': {'stocks': 60, 'bonds': 30, 'cash': 10},
-                    'timeframe': 'Long-term (5+ years)',
-                    'tags': ['value', 'fundamentals', 'dividend']
-                }
-            ],
-            'Medium': [
-                {
-                    'title': 'Growth and Income Strategy',
-                    'description': 'Balance between growth stocks and income-generating investments.',
-                    'allocation': {'stocks': 70, 'bonds': 20, 'cash': 10},
-                    'timeframe': 'Medium-term (3-5 years)',
-                    'tags': ['growth', 'income', 'balance']
-                },
-                {
-                    'title': 'Index-Based Strategy',
-                    'description': 'Focus on index funds and ETFs to match market performance with moderate risk.',
-                    'allocation': {'stocks': 75, 'bonds': 20, 'cash': 5},
-                    'timeframe': 'Medium to Long-term (3-10 years)',
-                    'tags': ['index', 'diversification', 'market']
-                }
-            ],
-            'High': [
-                {
-                    'title': 'Growth Strategy',
-                    'description': 'Focus on high-growth stocks with strong potential for capital appreciation.',
-                    'allocation': {'stocks': 85, 'bonds': 10, 'cash': 5},
-                    'timeframe': 'Medium-term (3-5 years)',
-                    'tags': ['growth', 'momentum', 'technology']
-                },
-                {
-                    'title': 'Momentum Strategy',
-                    'description': 'Capitalize on stocks showing strong upward price momentum and market outperformance.',
-                    'allocation': {'stocks': 90, 'bonds': 5, 'cash': 5},
-                    'timeframe': 'Short to Medium-term (1-3 years)',
-                    'tags': ['momentum', 'trend', 'tactical']
-                }
-            ],
-            'Very High': [
-                {
-                    'title': 'Aggressive Growth Strategy',
-                    'description': 'Target maximum growth through high-potential stocks, emerging markets, and disruptive sectors.',
-                    'allocation': {'stocks': 95, 'bonds': 0, 'cash': 5},
-                    'timeframe': 'Medium-term (3-5 years)',
-                    'tags': ['aggressive', 'disruption', 'emerging']
-                },
-                {
-                    'title': 'Speculative Strategy',
-                    'description': 'Focus on high-risk, high-reward opportunities including emerging technologies and turnaround situations.',
-                    'allocation': {'stocks': 95, 'altinvest': 3, 'cash': 2},
-                    'timeframe': 'Short to Medium-term (1-3 years)',
-                    'tags': ['speculative', 'emerging', 'disruptive']
-                }
-            ]
-        }
     
-    def get_recommendations(self, ticker, risk_profile, days=180):
+    def get_recommendations(self, ticker, risk_profile="Medium", data=None, sentiment=None):
         """
-        Generate investment recommendations based on analysis and risk profile
+        Generate investment recommendations for a stock based on risk profile
         
         Parameters:
         -----------
         ticker : str
-            Stock symbol (e.g., 'AAPL', 'MSFT')
+            Stock symbol
         risk_profile : str
-            Risk profile ('Very Low', 'Low', 'Medium', 'High', 'Very High')
-        days : int
-            Number of days of historical data to analyze
+            User's risk profile ('Very Low', 'Low', 'Medium', 'High', 'Very High')
+        data : pandas.DataFrame, optional
+            Stock data if already fetched
+        sentiment : float, optional
+            Sentiment score if already calculated
             
         Returns:
         --------
         list
             List of recommendation dictionaries
         """
-        try:
-            # Get stock data and info
-            stock_data = get_stock_data(ticker, days)
-            stock_info = self._get_mock_stock_info(ticker)  # Using mock data for demo
-            
-            # Calculate technical indicators and generate signals
-            indicators = calculate_indicators(stock_data)
-            signals = generate_signals(indicators)
-            patterns = identify_patterns(stock_data)
-            
-            # Analyze fundamental metrics
-            fundamental_score = self._analyze_fundamentals(stock_info)
-            
-            # Get overall technical score
-            technical_score = self._get_technical_score(signals, patterns)
-            
-            # Mock sentiment score (in real app, this would come from sentiment analysis)
-            sentiment_score = self._get_mock_sentiment_score(ticker)
-            
-            # Get risk-weighted score
-            if risk_profile not in self.risk_weights:
-                risk_profile = 'Medium'  # Default to medium if invalid profile
-                
-            weights = self.risk_weights[risk_profile]
-            overall_score = (
-                weights['technical'] * technical_score +
-                weights['sentiment'] * sentiment_score +
-                weights['fundamental'] * fundamental_score
-            )
-            
-            # Classify recommendation type
-            rec_type = self._classify_recommendation(overall_score)
-            
-            # Generate recommendations
-            recommendations = []
-            
-            # Stock-specific recommendation
-            stock_rec = {
-                'title': f"{rec_type} on {ticker}",
-                'description': self._generate_description(ticker, rec_type, signals, patterns, stock_info),
-                'confidence': min(abs(overall_score * 1.5), 0.95)  # Scale to 0-0.95 range
-            }
-            recommendations.append(stock_rec)
-            
-            # Risk profile based strategy recommendation
-            if risk_profile in self.strategies:
-                # Choose strategy based on recommendation type and risk profile
-                strategies = self.strategies[risk_profile]
-                if rec_type == 'Strong Buy' or rec_type == 'Buy':
-                    strategy_rec = strategies[1]  # More aggressive strategy
-                else:
-                    strategy_rec = strategies[0]  # More conservative strategy
-                
-                strategy_rec['confidence'] = 0.8  # High confidence in strategy recommendation
-                recommendations.append(strategy_rec)
-            
-            # Portfolio diversification recommendation
-            diversification_rec = self._get_diversification_recommendation(ticker, risk_profile)
-            recommendations.append(diversification_rec)
-            
-            return recommendations
+        # If we don't have a valid risk profile, use Medium
+        if risk_profile not in self.risk_profiles:
+            risk_profile = "Medium"
         
-        except Exception as e:
-            # Fallback to generic recommendations if there's an error
-            return self._get_generic_recommendations(risk_profile)
+        # Generate mock recommendations for demonstration
+        mock_recs = self._get_mock_recommendations(ticker, risk_profile)
+        return mock_recs
+    
+    def _get_mock_recommendations(self, ticker, risk_profile):
+        """Generate mock recommendations for demonstration purposes"""
+        recommendations = []
+        
+        if risk_profile in ["Very Low", "Low"]:
+            recommendations.append({
+                "title": "Conservative Position",
+                "description": f"Consider a small position in {ticker} as part of a diversified portfolio. Limit exposure to no more than 2-3% of your total investments.",
+                "confidence": 0.85
+            })
+            
+            recommendations.append({
+                "title": "Dollar-Cost Averaging",
+                "description": f"Rather than investing a lump sum in {ticker}, consider buying in smaller amounts over time to reduce the impact of volatility.",
+                "confidence": 0.9
+            })
+            
+            recommendations.append({
+                "title": "Protective Options Strategy",
+                "description": f"If investing in {ticker}, consider using protective puts to limit downside risk.",
+                "confidence": 0.7
+            })
+            
+        elif risk_profile == "Medium":
+            recommendations.append({
+                "title": "Balanced Position",
+                "description": f"Consider a moderate position in {ticker} as part of a balanced portfolio. Limit exposure to 3-5% of your total investments.",
+                "confidence": 0.8
+            })
+            
+            recommendations.append({
+                "title": "Technical Entry Points",
+                "description": f"Look for technical support levels to initiate positions in {ticker}, with clear stop-loss levels to manage risk.",
+                "confidence": 0.75
+            })
+            
+            recommendations.append({
+                "title": "Sector Allocation",
+                "description": f"Ensure your investment in {ticker} doesn't overweight your portfolio in its sector.",
+                "confidence": 0.85
+            })
+            
+        else:  # High or Very High
+            recommendations.append({
+                "title": "Growth Opportunity",
+                "description": f"Consider a significant position in {ticker} for potential growth. Could allocate 5-10% of portfolio depending on conviction.",
+                "confidence": 0.7
+            })
+            
+            recommendations.append({
+                "title": "Momentum Strategy",
+                "description": f"Use technical momentum indicators to time entries and exits for {ticker}, looking to capture shorter-term price movements.",
+                "confidence": 0.65
+            })
+            
+            recommendations.append({
+                "title": "Options Strategy",
+                "description": f"Consider using call options on {ticker} to leverage your position for potentially higher returns (with higher risk).",
+                "confidence": 0.6
+            })
+        
+        # Add a common recommendation for all risk profiles
+        recommendations.append({
+            "title": "Stay Informed",
+            "description": f"Monitor news, earnings reports, and sector trends that could impact {ticker}.",
+            "confidence": 0.95
+        })
+        
+        return recommendations
     
     def _analyze_fundamentals(self, stock_info):
         """
