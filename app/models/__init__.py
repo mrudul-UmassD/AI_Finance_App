@@ -1,1 +1,1 @@
-# Models package for the AI Financial Advisor 
+# Machine learning models package for the AI Financial Advisor 

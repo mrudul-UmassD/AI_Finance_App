@@ -1,1 +1,1 @@
-# Utils package for the AI Financial Advisor 
+# Utilities package for the AI Financial Advisor 

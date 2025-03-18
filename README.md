@@ -1,43 +1,84 @@
 # AI Financial Advisor
 
-A self-learning AI application for real-time stock analysis and financial advice.
+A machine learning-powered financial advisor application that analyzes stock data, performs sentiment analysis on financial news, and provides investment recommendations.
 
 ## Features
 
-- Real-time stock data collection and analysis
-- Machine learning models for price prediction
-- Sentiment analysis of financial news
-- Technical indicator analysis
-- Personalized investment recommendations
-- Interactive dashboard for data visualization
+- **Stock Data Analysis**: View historical stock data and real-time technical indicators
+- **Sentiment Analysis**: Analyze financial news sentiment to gauge market perception
+- **Price Prediction**: ML-based price predictions for future stock performance
+- **Technical Analysis**: Key technical indicators including RSI, MACD, Bollinger Bands, etc.
+- **Investment Recommendations**: Personalized investment advice based on risk profile
 
-## Setup
+## No API Keys Required!
 
-1. Clone the repository
+This application retrieves all data directly from the web without requiring any API keys:
+
+- Stock data is fetched using yfinance with built-in web scraping fallback
+- Financial news is scraped directly from Yahoo Finance
+- All processing is done locally using lightweight ML models
+
+## Requirements
+
+- Python 3.8+
+- Dependencies listed in requirements.txt
+
+## Installation
+
+1. Clone the repository:
+```
+git clone https://github.com/yourusername/ai-financial-advisor.git
+cd ai-financial-advisor
+```
+
 2. Install dependencies:
-   ```
-   pip install -r requirements.txt
-   ```
-3. Set up API keys in `.env` file
-4. Run the application:
-   ```
-   streamlit run app/main.py
-   ```
+```
+pip install -r requirements.txt
+```
+
+3. Run the application:
+```
+python run.py
+```
+
+Or directly with Streamlit:
+```
+streamlit run app/main.py
+```
+
+## How It Works
+
+1. **Data Collection**: The app fetches stock data and news using web scraping techniques
+2. **Technical Analysis**: Calculates various technical indicators to identify patterns and signals
+3. **Sentiment Analysis**: Analyzes financial news sentiment using NLTK VADER with domain-specific enhancements
+4. **Price Prediction**: Uses machine learning models (Random Forest or Linear Regression) to predict future prices
+5. **Recommendation Engine**: Combines technical indicators, sentiment, and predictions to generate investment advice
 
 ## Project Structure
 
-- `app/api/`: API connections to financial data sources
-- `app/models/`: Machine learning models for prediction and analysis
-- `app/data/`: Data processing and storage
-- `app/utils/`: Utility functions
-- `app/components/`: UI components for the dashboard
+```
+ai-financial-advisor/
+├── app/
+│   ├── api/              # Data retrieval modules
+│   ├── components/       # UI components
+│   ├── data/             # Data processing
+│   ├── models/           # ML models
+│   ├── utils/            # Utility functions
+│   └── main.py           # Main Streamlit app
+├── requirements.txt      # Project dependencies
+├── run.py                # Application runner
+└── README.md             # This file
+```
 
-## Usage
+## Technologies Used
 
-After starting the application, navigate to the provided URL in your browser. The dashboard provides:
+- **Streamlit**: For the interactive web interface
+- **Pandas & NumPy**: For data manipulation and analysis
+- **Scikit-learn**: For machine learning models
+- **NLTK**: For natural language processing and sentiment analysis
+- **Plotly**: For interactive charts and visualizations
+- **BeautifulSoup**: For web scraping data
 
-- Stock price predictions
-- Market sentiment analysis
-- Technical indicator signals
-- Investment recommendations based on your risk profile
-- Real-time market news analysis 
+## Disclaimer
+
+This application is for educational and informational purposes only. The investment recommendations provided should not be considered financial advice. Always consult with a professional financial advisor before making investment decisions. 

@@ -1,1 +1,1 @@
-# API package for the AI Financial Advisor 
+# API and data retrieval package for the AI Financial Advisor 
